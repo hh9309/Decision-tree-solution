@@ -1,0 +1,6 @@
+{
+  "name": "决策树运筹学决策分析系统",
+  "description": "基于逆向归纳算法（EMV）、多维敏感性分析与风险剖面分析的专业高颜值运筹学决策分析树系统。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
