@@ -19,71 +19,126 @@ const generatePythonCode = (treeNodes: Record<string, DecisionTreeNode>, rootId:
     cost: n.cost || 0
   }));
 
-  const nodesJson = JSON.stringify(simplNodes, null, 4);
+  // Format as valid Python dictionary literals by converting null/true/false to None/True/False
+  const pythonNodesLiteral = JSON.stringify(simplNodes, null, 4)
+    .replace(/:\s*null/g, ': None')
+    .replace(/:\s*true/g, ': True')
+    .replace(/:\s*false/g, ': False');
 
   return `# -*- coding: utf-8 -*-
 """
 OR-Tree 决策树逆向归纳求解脚本 (Operational Research Solver)
 方案名称: ${scenarioName}
-生成时间: 2026-06-23
+生成时间: ${new Date().toISOString().slice(0, 10)}
 """
 
 # 决策树拓扑与参数矩阵定义 (节点数: ${Object.keys(treeNodes).length})
-DECISION_TREE_NODES = ${nodesJson}
+DECISION_TREE_NODES = ${pythonNodesLiteral}
 
-def solve_decision_tree(nodes_list, root_id="root"):
-    # 构建快速建索引映射
+def solve_decision_tree(nodes_list, root_id="${rootId}"):
+    """
+    基于期望货币价值 (EMV) 与动态规划逆向归纳算法 (Backward Induction) 求解最优决策路径
+    """
     db = {n["id"]: n for n in nodes_list}
-    
-    # 递归逆向归纳求解节点期望价值
+    children_map = {}
+    for n in nodes_list:
+        p_id = n.get("parentId")
+        if p_id:
+            children_map.setdefault(p_id, []).append(n)
+
+    computed_emv = {}
+    optimal_choices = {}
+    pruned_nodes = set()
+
     def get_emv(node_id):
+        if node_id in computed_emv:
+            return computed_emv[node_id]
+
         node = db.get(node_id)
         if not node:
             return 0.0
-            
-        # 如果是终点/叶子，直接返回结局值
-        if node["type"] == "TERMINAL":
-            return float(node["payoff"] if node["payoff"] is not None else 0.0)
-            
-        # 查找它的直接子级分支
-        children = [c for c in nodes_list if c["parentId"] == node_id]
-        if not children:
-            return float(node["payoff"] if node["payoff"] is not None else 0.0)
-            
+
+        children = children_map.get(node_id, [])
+
+        # 终点或无子节点: 直接返回收益净值
+        if node["type"] == "TERMINAL" or not children:
+            val = float(node["payoff"] if node.get("payoff") is not None else 0.0)
+            computed_emv[node_id] = round(val, 2)
+            return computed_emv[node_id]
+
         if node["type"] == "CHANCE":
-            # 机会点计算公式: EMV = Σ (概率 P × (下级期望 EMV - 下级路径成本))
+            # 机会点: 加权平均 EMV = sum(P_i * (EMV_child_i - Cost_child_i))
             emv_val = 0.0
+            total_prob = 0.0
             for child in children:
-                prob = child["probability"] if child["probability"] is not None else 0.0
-                child_emv = get_emv(child["id"])
-                child_cost = child["cost"]
-                emv_val += prob * (child_emv - child_cost)
-            return round(emv_val, 2)
+                prob = float(child["probability"] if child.get("probability") is not None else 0.0)
+                total_prob += prob
+                child_val = get_emv(child["id"]) - float(child.get("cost") or 0.0)
+                emv_val += prob * child_val
             
+            # 概率归一化处理（若总概率不为0但略有浮动）
+            if total_prob > 0 and abs(total_prob - 1.0) > 0.001:
+                emv_val = emv_val / total_prob
+
+            computed_emv[node_id] = round(emv_val, 2)
+            return computed_emv[node_id]
+
         elif node["type"] == "DECISION":
-            # 决策点计算公式: max_i (下级期望 EMV - 下级路径分支成本)
+            # 决策点: 选最大净期望 max(EMV_child - Cost_child)
             options = []
             for child in children:
-                child_emv = get_emv(child["id"])
-                child_cost = child["cost"]
-                options.append((child["name"], child_emv - child_cost))
-            
+                child_val = get_emv(child["id"]) - float(child.get("cost") or 0.0)
+                options.append((child["id"], child["name"], child_val))
+
             if not options:
+                computed_emv[node_id] = 0.0
                 return 0.0
-            best_opt = max(options, key=lambda x: x[1])
-            return round(best_opt[1], 2)
-            
+
+            best_opt = max(options, key=lambda x: x[2])
+            optimal_choices[node_id] = best_opt
+
+            # 标记剪枝分支
+            for opt_id, opt_name, _ in options:
+                if opt_id != best_opt[0]:
+                    pruned_nodes.add(opt_id)
+
+            computed_emv[node_id] = round(best_opt[2], 2)
+            return computed_emv[node_id]
+
+        computed_emv[node_id] = 0.0
         return 0.0
 
-    print("-" * 60)
-    print("🌍 正在构建算法树拓扑网络...")
-    print(f"检测到 {len(nodes_list)} 个场景节点，执行后向优导算法求期望...")
-    
+    print("=" * 65)
+    print(f"🌲 OR-Tree 决策树逆向归纳计算仿真")
+    print(f"方案: {${JSON.stringify(scenarioName)}} | 根节点: {root_id}")
+    print(f"总节点数: {len(nodes_list)}")
+    print("-" * 65)
+
     final_emv = get_emv(root_id)
-    print("🎯 逆向归纳模型求解完毕！")
-    print(f"最大平均期望货币价值 (EMV) = ¥ {final_emv} 万元")
-    print("-" * 60)
-    return final_emv
+
+    print("\\n📊 各节点期望货币价值 (EMV) 计算结果:")
+    for n in nodes_list:
+        n_id = n["id"]
+        emv = computed_emv.get(n_id, 0.0)
+        n_type = n["type"]
+        is_pruned = " [❌ 剪枝丢弃]" if n_id in pruned_nodes else ""
+        print(f"  - [{n_type:<8}] {n['name']} (ID: {n_id}): EMV = ¥ {emv} 万元{is_pruned}")
+
+    if optimal_choices:
+        print("\\n🎯 最优决策行动路径推荐 (Optimal Policy):")
+        for dec_id, best in optimal_choices.items():
+            dec_node = db.get(dec_id, {})
+            print(f"  ★ 在决策点 [{dec_node.get('name', dec_id)}] ➔ 优选: [{best[1]}] (分支期望净值: ¥ {round(best[2], 2)} 万元)")
+
+    print("\\n" + "=" * 65)
+    print(f"🏆 顶层全局最优平均期望净收益: ¥ {final_emv} 万元")
+    print("=" * 65)
+
+    return {
+        "final_emv": final_emv,
+        "computed_emv": computed_emv,
+        "optimal_choices": optimal_choices
+    }
 
 if __name__ == "__main__":
     solve_decision_tree(DECISION_TREE_NODES, "${rootId}")
