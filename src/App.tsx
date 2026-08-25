@@ -21,9 +21,9 @@ const generatePythonCode = (treeNodes: Record<string, DecisionTreeNode>, rootId:
 
   // Format as valid Python dictionary literals by converting null/true/false to None/True/False
   const pythonNodesLiteral = JSON.stringify(simplNodes, null, 4)
-    .replace(/:\s*null/g, ': None')
-    .replace(/:\s*true/g, ': True')
-    .replace(/:\s*false/g, ': False');
+    .replace(/:\s*null\b/g, ': None')
+    .replace(/:\s*true\b/g, ': True')
+    .replace(/:\s*false\b/g, ': False');
 
   return `# -*- coding: utf-8 -*-
 """
@@ -31,6 +31,11 @@ OR-Tree 决策树逆向归纳求解脚本 (Operational Research Solver)
 方案名称: ${scenarioName}
 生成时间: ${new Date().toISOString().slice(0, 10)}
 """
+
+# 兼容性定义（防止外部执行环境或自定义扩展数据中出现 JS 风格常量）
+null = None
+true = True
+false = False
 
 # 决策树拓扑与参数矩阵定义 (节点数: ${Object.keys(treeNodes).length})
 DECISION_TREE_NODES = ${pythonNodesLiteral}
